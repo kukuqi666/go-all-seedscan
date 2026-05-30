@@ -67,22 +67,41 @@ func (d *DashboardUI) UpdateProgress(processedBranches, totalBranches uint64, es
 
 	pct := float64(processedBranches) / float64(max(totalBranches, 1)) * 100
 	rate := float64(checkedMnemonics) / max(elapsed.Seconds(), 0.001)
-	bar := renderBar(pct, 20)
 
-	remaining := ""
-	if pct > 0 && pct < 100 {
-		remainingSec := elapsed.Seconds() * (100 - pct) / pct
-		remaining = "~" + formatDurationShort(time.Duration(remainingSec*float64(time.Second)))
+	var line string
+	if pct >= 100 && validMnemonics > 0 {
+		checkPct := float64(checkedMnemonics) / float64(validMnemonics) * 100
+		bar := renderBar(checkPct, 20)
+		remaining := ""
+		if checkPct > 0 && checkPct < 100 {
+			remainingSec := elapsed.Seconds() * (100 - checkPct) / checkPct
+			remaining = "~" + formatDurationShort(time.Duration(remainingSec*float64(time.Second)))
+		}
+		line = fmt.Sprintf("%s 枚举完成 检查%s%s/%s%s %s%5.1f%%%s 已用%s 预计%s 速度%s%.0f条/s%s 命中%s",
+			bar,
+			colorYellow, formatUint64(checkedMnemonics), formatUint64(validMnemonics), colorReset,
+			colorYellow, checkPct, colorReset,
+			formatDurationShort(elapsed),
+			remaining,
+			colorCyan, rate, colorReset,
+			formatUint64(hitsFound),
+		)
+	} else {
+		bar := renderBar(pct, 20)
+		remaining := ""
+		if pct > 0 && pct < 100 {
+			remainingSec := elapsed.Seconds() * (100 - pct) / pct
+			remaining = "~" + formatDurationShort(time.Duration(remainingSec*float64(time.Second)))
+		}
+		line = fmt.Sprintf("%s %s%5.1f%%%s 已用%s 预计%s 速度%s%.0f条/s%s 命中%s",
+			bar,
+			colorYellow, pct, colorReset,
+			formatDurationShort(elapsed),
+			remaining,
+			colorCyan, rate, colorReset,
+			formatUint64(hitsFound),
+		)
 	}
-
-	line := fmt.Sprintf("%s %s%5.1f%%%s 已用%s 预计%s 速度%s%.0f条/s%s 命中%s",
-		bar,
-		colorYellow, pct, colorReset,
-		formatDurationShort(elapsed),
-		remaining,
-		colorCyan, rate, colorReset,
-		formatUint64(hitsFound),
-	)
 
 	fmt.Fprintf(os.Stdout, "\r%s\x1b[K", line)
 }
@@ -125,7 +144,7 @@ func (d *DashboardUI) PrintSummary(elapsed time.Duration) {
 		return
 	}
 	fmt.Fprintln(os.Stdout)
-	fmt.Fprintf(os.Stdout, "%s运行结束，总耗时 %s%s\n", colorCyan+colorBold, formatDurationShort(elapsed), colorReset)
+	fmt.Fprintf(os.Stdout, "%s扫描完成，总耗时 %s%s\n", colorCyan+colorBold, formatDurationShort(elapsed), colorReset)
 }
 
 func printBanner() {

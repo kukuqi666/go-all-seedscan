@@ -111,7 +111,7 @@ func CheckEVMBalance(address string, rpcURL string) (*big.Int, error) {
 	return balance, nil
 }
 
-func CheckMnemonicOnChains(mnemonic string, chains []ChainConfig) ([]ChainResult, error) {
+func CheckMnemonicOnChains(mnemonic string, chains []ChainConfig) (results []ChainResult, err error) {
 	type chainCheckResult struct {
 		res ChainResult
 		ok  bool
@@ -120,6 +120,13 @@ func CheckMnemonicOnChains(mnemonic string, chains []ChainConfig) ([]ChainResult
 	ch := make(chan chainCheckResult, len(chains))
 	for _, c := range chains {
 		go func(chain ChainConfig) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Debug().Str("chain", chain.Name).Any("panic", r).Msg("检查链时发生异常")
+					ch <- chainCheckResult{}
+				}
+			}()
+
 			addr, err := DeriveEVMAddress(mnemonic, chain.DerivationPath)
 			if err != nil {
 				log.Debug().Err(err).Str("chain", chain.Name).Msg("地址派生失败")
@@ -150,7 +157,6 @@ func CheckMnemonicOnChains(mnemonic string, chains []ChainConfig) ([]ChainResult
 		}(c)
 	}
 
-	var results []ChainResult
 	for range chains {
 		r := <-ch
 		if r.ok {
