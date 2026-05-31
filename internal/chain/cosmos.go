@@ -76,18 +76,21 @@ func CheckCosmosBalance(address, lcdURL string) (*big.Int, error) {
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+			time.Sleep(time.Duration(attempt) * 800 * time.Millisecond)
 		}
 
+		acquireAPI()
 		ctx, cancel := context.WithTimeout(context.Background(), APITimeout)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			cancel()
+			releaseAPI()
 			continue
 		}
 
 		resp, err := http.DefaultClient.Do(req)
 		cancel()
+		releaseAPI()
 
 		if err != nil {
 			continue
@@ -95,7 +98,7 @@ func CheckCosmosBalance(address, lcdURL string) (*big.Int, error) {
 
 		if resp.StatusCode == 429 {
 			resp.Body.Close()
-			time.Sleep(2 * time.Second)
+			time.Sleep(3 * time.Second)
 			continue
 		}
 		if resp.StatusCode != 200 {

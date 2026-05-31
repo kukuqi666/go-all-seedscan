@@ -112,23 +112,26 @@ func DeriveBitcoinAddress(mnemonic, pathStr string) (string, error) {
 
 func CheckBitcoinBalance(address string) (*big.Int, error) {
 	const maxRetries = 3
-	url := fmt.Sprintf("https://blockstream.info/api/address/%s", address)
+	url := fmt.Sprintf("https://mempool.space/api/address/%s", address)
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+			time.Sleep(time.Duration(attempt) * 800 * time.Millisecond)
 		}
 
+		acquireAPI()
 		ctx, cancel := context.WithTimeout(context.Background(), APITimeout)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			cancel()
+			releaseAPI()
 			continue
 		}
 		req.Header.Set("User-Agent", "seedscan/1.0")
 
 		resp, err := http.DefaultClient.Do(req)
 		cancel()
+		releaseAPI()
 
 		if err != nil {
 			continue
@@ -136,7 +139,7 @@ func CheckBitcoinBalance(address string) (*big.Int, error) {
 
 		if resp.StatusCode == 429 {
 			resp.Body.Close()
-			time.Sleep(2 * time.Second)
+			time.Sleep(3 * time.Second)
 			continue
 		}
 		if resp.StatusCode != 200 {

@@ -69,20 +69,23 @@ func CheckSolanaBalance(address string) (*big.Int, error) {
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+			time.Sleep(time.Duration(attempt) * 800 * time.Millisecond)
 		}
 
 		reqBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"getBalance","params":["%s"]}`, address)
+		acquireAPI()
 		ctx, cancel := context.WithTimeout(context.Background(), APITimeout)
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.mainnet-beta.solana.com", strings.NewReader(reqBody))
 		if err != nil {
 			cancel()
+			releaseAPI()
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := http.DefaultClient.Do(req)
 		cancel()
+		releaseAPI()
 
 		if err != nil {
 			continue

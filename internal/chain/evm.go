@@ -101,14 +101,17 @@ func CheckEVMBalance(address string, rpcURL string) (*big.Int, error) {
 			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 		}
 
+		acquireAPI()
 		client, err := getRPCClient(rpcURL)
 		if err != nil {
+			releaseAPI()
 			continue
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), APITimeout)
 		balance, err := client.BalanceAt(ctx, common.HexToAddress(address), nil)
 		cancel()
+		releaseAPI()
 
 		if err != nil {
 			clientMu.Lock()

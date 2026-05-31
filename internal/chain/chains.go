@@ -8,9 +8,25 @@ import (
 )
 
 const (
-	MaxAPIConcurrency = 32
+	MaxAPIConcurrency = 8
 	APITimeout        = 5 * time.Second
 )
+
+var apiLimiter = make(chan struct{}, MaxAPIConcurrency)
+
+func init() {
+	for i := 0; i < MaxAPIConcurrency; i++ {
+		apiLimiter <- struct{}{}
+	}
+}
+
+func acquireAPI() {
+	<-apiLimiter
+}
+
+func releaseAPI() {
+	apiLimiter <- struct{}{}
+}
 
 type ChainConfig struct {
 	Name           string
