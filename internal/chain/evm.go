@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -93,28 +94,40 @@ func DeriveEVMAddress(mnemonic, pathStr string) (string, error) {
 }
 
 func CheckEVMBalance(address string, rpcURL string) (*big.Int, error) {
-	client, err := getRPCClient(rpcURL)
-	if err != nil {
-		return nil, err
+	const maxRetries = 3
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+		}
+
+		client, err := getRPCClient(rpcURL)
+		if err != nil {
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), APITimeout)
+		balance, err := client.BalanceAt(ctx, common.HexToAddress(address), nil)
+		cancel()
+
+		if err != nil {
+			clientMu.Lock()
+			delete(clientPool, rpcURL)
+			clientMu.Unlock()
+			continue
+		}
+
+		return balance, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), APITimeout)
-	defer cancel()
-
-	balance, err := client.BalanceAt(ctx, common.HexToAddress(address), nil)
-	if err != nil {
-		clientMu.Lock()
-		delete(clientPool, rpcURL)
-		clientMu.Unlock()
-		return nil, errors.Wrap(err, "查询余额失败")
-	}
-	return balance, nil
+	return nil, fmt.Errorf("查询余额失败（重试%d次）", maxRetries)
 }
 
-func CheckMnemonicOnChains(mnemonic string, chains []ChainConfig) (results []ChainResult, err error) {
+func CheckMnemonicOnChains(mnemonic string, chains []ChainConfig) (results []ChainResult, failedCount int, err error) {
 	type chainCheckResult struct {
-		res ChainResult
-		ok  bool
+		res    ChainResult
+		ok     bool
+		failed bool
 	}
 
 	ch := make(chan chainCheckResult, len(chains))
@@ -123,21 +136,60 @@ func CheckMnemonicOnChains(mnemonic string, chains []ChainConfig) (results []Cha
 			defer func() {
 				if r := recover(); r != nil {
 					log.Debug().Str("chain", chain.Name).Any("panic", r).Msg("检查链时发生异常")
-					ch <- chainCheckResult{}
+					ch <- chainCheckResult{failed: true}
 				}
 			}()
 
-			addr, err := DeriveEVMAddress(mnemonic, chain.DerivationPath)
-			if err != nil {
-				log.Debug().Err(err).Str("chain", chain.Name).Msg("地址派生失败")
-				ch <- chainCheckResult{}
+			var addr string
+			var balance *big.Int
+			var checkErr error
+
+			switch chain.Type {
+			case "evm":
+				addr, checkErr = DeriveEVMAddress(mnemonic, chain.DerivationPath)
+				if checkErr != nil {
+					log.Debug().Err(checkErr).Str("chain", chain.Name).Msg("地址派生失败")
+					ch <- chainCheckResult{failed: true}
+					return
+				}
+				balance, checkErr = CheckEVMBalance(addr, chain.RPC)
+
+			case "bitcoin":
+				addr, checkErr = DeriveBitcoinAddress(mnemonic, chain.DerivationPath)
+				if checkErr != nil {
+					log.Debug().Err(checkErr).Str("chain", chain.Name).Msg("地址派生失败")
+					ch <- chainCheckResult{failed: true}
+					return
+				}
+				balance, checkErr = CheckBitcoinBalance(addr)
+
+			case "solana":
+				addr, checkErr = DeriveSolanaAddress(mnemonic, chain.DerivationPath)
+				if checkErr != nil {
+					log.Debug().Err(checkErr).Str("chain", chain.Name).Msg("地址派生失败")
+					ch <- chainCheckResult{failed: true}
+					return
+				}
+				balance, checkErr = CheckSolanaBalance(addr)
+
+			case "cosmos":
+				addr, checkErr = DeriveCosmosAddress(mnemonic, chain.DerivationPath, chain.Bech32Prefix)
+				if checkErr != nil {
+					log.Debug().Err(checkErr).Str("chain", chain.Name).Msg("地址派生失败")
+					ch <- chainCheckResult{failed: true}
+					return
+				}
+				balance, checkErr = CheckCosmosBalance(addr, chain.LCD)
+
+			default:
+				log.Debug().Str("chain", chain.Name).Str("type", chain.Type).Msg("不支持的链类型")
+				ch <- chainCheckResult{failed: true}
 				return
 			}
 
-			balance, err := CheckEVMBalance(addr, chain.RPC)
-			if err != nil {
-				log.Debug().Err(err).Str("chain", chain.Name).Str("addr", addr).Msg("余额查询失败")
-				ch <- chainCheckResult{}
+			if checkErr != nil {
+				log.Debug().Err(checkErr).Str("chain", chain.Name).Str("addr", addr).Msg("余额查询失败")
+				ch <- chainCheckResult{failed: true}
 				return
 			}
 
@@ -162,7 +214,10 @@ func CheckMnemonicOnChains(mnemonic string, chains []ChainConfig) (results []Cha
 		if r.ok {
 			results = append(results, r.res)
 		}
+		if r.failed {
+			failedCount++
+		}
 	}
 
-	return results, nil
+	return results, failedCount, nil
 }

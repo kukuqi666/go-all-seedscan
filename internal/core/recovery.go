@@ -22,11 +22,12 @@ type ProgressTracker struct {
 	validMnemonics    atomic.Uint64
 	checkedMnemonics  atomic.Uint64
 	hitsFound         atomic.Uint64
+	failedChecks      atomic.Uint64
 }
 
 type Reporter interface {
 	StartSession(missingWords int, searchSpace *big.Int, workers int, stopOnFirst bool)
-	UpdateProgress(processedBranches, totalBranches uint64, estimatedProcessed, totalComb *big.Int, validMnemonics, checkedMnemonics, hitsFound uint64, elapsed time.Duration, status string)
+	UpdateProgress(processedBranches, totalBranches uint64, estimatedProcessed, totalComb *big.Int, validMnemonics, checkedMnemonics, hitsFound, failedChecks uint64, elapsed time.Duration, status string)
 	AddWalletHit(chainName, symbol, address, balance, seed string)
 	SetMessage(message string)
 	PrintValidation(valid bool)
@@ -89,6 +90,7 @@ func startProgressLoop(ctx context.Context, missingCount int, tracker *ProgressT
 					tracker.validMnemonics.Load(),
 					tracker.checkedMnemonics.Load(),
 					tracker.hitsFound.Load(),
+					tracker.failedChecks.Load(),
 					elapsed,
 					"任务已结束，等待结果汇总。",
 				)
@@ -109,6 +111,7 @@ func startProgressLoop(ctx context.Context, missingCount int, tracker *ProgressT
 					tracker.validMnemonics.Load(),
 					tracker.checkedMnemonics.Load(),
 					tracker.hitsFound.Load(),
+					tracker.failedChecks.Load(),
 					elapsed,
 					"正在搜索候选助记词并执行多链余额检查...",
 				)
@@ -218,8 +221,11 @@ func processResults(ctx context.Context, cancel context.CancelFunc, results <-ch
 				return
 			}
 
-			chainResults, err := chain.CheckMnemonicOnChains(p, activeChains)
+			chainResults, failedCount, err := chain.CheckMnemonicOnChains(p, activeChains)
 			progress.checkedMnemonics.Add(1)
+			if failedCount > 0 {
+				progress.failedChecks.Add(uint64(failedCount))
+			}
 			if err != nil {
 				return
 			}

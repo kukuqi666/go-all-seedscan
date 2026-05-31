@@ -58,7 +58,7 @@ func (d *DashboardUI) StartSession(missingWords int, searchSpace *big.Int, worke
 	fmt.Fprintln(os.Stdout)
 }
 
-func (d *DashboardUI) UpdateProgress(processedBranches, totalBranches uint64, estimatedProcessed, totalComb *big.Int, validMnemonics, checkedMnemonics, hitsFound uint64, elapsed time.Duration, status string) {
+func (d *DashboardUI) UpdateProgress(processedBranches, totalBranches uint64, estimatedProcessed, totalComb *big.Int, validMnemonics, checkedMnemonics, hitsFound, failedChecks uint64, elapsed time.Duration, status string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.started || d.closed {
@@ -77,7 +77,11 @@ func (d *DashboardUI) UpdateProgress(processedBranches, totalBranches uint64, es
 			remainingSec := elapsed.Seconds() * (100 - checkPct) / checkPct
 			remaining = "~" + formatDurationShort(time.Duration(remainingSec*float64(time.Second)))
 		}
-		line = fmt.Sprintf("%s 枚举完成 检查%s%s/%s%s %s%5.1f%%%s 已用%s 预计%s 速度%s%.0f条/s%s 命中%s",
+		failInfo := ""
+		if failedChecks > 0 {
+			failInfo = fmt.Sprintf(" %s失败%s%s", colorRed, formatUint64(failedChecks), colorReset)
+		}
+		line = fmt.Sprintf("%s 枚举完成 检查%s%s/%s%s %s%5.1f%%%s 已用%s 预计%s 速度%s%.0f条/s%s 命中%s%s",
 			bar,
 			colorYellow, formatUint64(checkedMnemonics), formatUint64(validMnemonics), colorReset,
 			colorYellow, checkPct, colorReset,
@@ -85,6 +89,7 @@ func (d *DashboardUI) UpdateProgress(processedBranches, totalBranches uint64, es
 			remaining,
 			colorCyan, rate, colorReset,
 			formatUint64(hitsFound),
+			failInfo,
 		)
 	} else {
 		bar := renderBar(pct, 20)
@@ -93,13 +98,18 @@ func (d *DashboardUI) UpdateProgress(processedBranches, totalBranches uint64, es
 			remainingSec := elapsed.Seconds() * (100 - pct) / pct
 			remaining = "~" + formatDurationShort(time.Duration(remainingSec*float64(time.Second)))
 		}
-		line = fmt.Sprintf("%s %s%5.1f%%%s 已用%s 预计%s 速度%s%.0f条/s%s 命中%s",
+		failInfo := ""
+		if failedChecks > 0 {
+			failInfo = fmt.Sprintf(" %s失败%s%s", colorRed, formatUint64(failedChecks), colorReset)
+		}
+		line = fmt.Sprintf("%s %s%5.1f%%%s 已用%s 预计%s 速度%s%.0f条/s%s 命中%s%s",
 			bar,
 			colorYellow, pct, colorReset,
 			formatDurationShort(elapsed),
 			remaining,
 			colorCyan, rate, colorReset,
 			formatUint64(hitsFound),
+			failInfo,
 		)
 	}
 
