@@ -8,6 +8,9 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build (${{ matrix.goos }}-${{ matrix.goarch }})
@@ -45,40 +48,39 @@ jobs:
         run: |
           EXT=""
           if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
-          go build -ldflags="-s -w" -o "recover-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" .
+          mkdir -p dist
+          go build -ldflags="-s -w" -o "dist/recover-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: recover-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: recover-${{ matrix.goos }}-${{ matrix.goarch }}*
+          path: dist/*
 
   release:
-    name: Create Release
+    name: Publish Release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: dist
 
-      - name: Package binaries
+      - name: Compress binaries
         run: |
-          cd artifacts
+          cd dist
           for dir in recover-*; do
             if [ -d "$dir" ]; then
-              ARCHIVE_NAME="${dir}.tar.gz"
-              tar -czf "../${ARCHIVE_NAME}" -C "$dir" .
+              tar -czf "../${dir}.tar.gz" -C "$dir" .
             fi
           done
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: |
-            *.tar.gz
+          files: recover-*.tar.gz
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
