@@ -3,6 +3,7 @@ package main
 import (
 	"time"
 
+	"recover/internal/chain"
 	"recover/internal/config"
 	"recover/internal/core"
 	"recover/internal/logger"
@@ -19,6 +20,8 @@ func main() {
 	}
 
 	core.InitWordList()
+
+	chain.SetAPIKey(cfg.APIKey)
 
 	dashboard := ui.NewDashboardUI()
 	defer dashboard.Close()

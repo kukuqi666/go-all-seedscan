@@ -42,19 +42,44 @@ func (d *DashboardUI) Close() {
 	fmt.Fprintln(os.Stdout)
 }
 
-func (d *DashboardUI) StartSession(missingWords int, searchSpace *big.Int, workers int, stopOnFirst bool) {
+func (d *DashboardUI) StartSession(missingWords int, searchSpace *big.Int, workers int, stopOnFirst bool, offline bool, targetAddress string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.started = true
 
 	printBanner()
-	printPanel("会话信息",
-		fmt.Sprintf("模式         : %sBIP39 助记词恢复 + 多链 EVM 余额扫描%s", colorBlue, colorReset),
+
+	modeLine := fmt.Sprintf("模式         : %sBIP39 助记词恢复 + 多链余额扫描%s", colorBlue, colorReset)
+	if offline {
+		modeLine = fmt.Sprintf("模式         : %sBIP39 助记词恢复 + 离线地址比对（无需API）%s", colorGreen, colorReset)
+	}
+
+	lines := []string{
+		modeLine,
 		fmt.Sprintf("缺失单词数   : %d", missingWords),
 		fmt.Sprintf("并发数       : %d", workers),
 		fmt.Sprintf("搜索空间     : %s", formatBigInt(searchSpace)),
 		fmt.Sprintf("找到即停止   : %t", stopOnFirst),
-	)
+	}
+
+	if offline && targetAddress != "" {
+		addrs := strings.Split(targetAddress, ",")
+		if len(addrs) == 1 {
+			lines = append(lines, fmt.Sprintf("目标地址     : %s", strings.TrimSpace(addrs[0])))
+		} else {
+			lines = append(lines, fmt.Sprintf("目标地址     : %d个地址", len(addrs)))
+			for i, addr := range addrs {
+				if i < 3 {
+					lines = append(lines, fmt.Sprintf("  地址%d       : %s", i+1, strings.TrimSpace(addr)))
+				}
+			}
+			if len(addrs) > 3 {
+				lines = append(lines, fmt.Sprintf("  ...         : 还有%d个地址", len(addrs)-3))
+			}
+		}
+	}
+
+	printPanel("会话信息", lines...)
 	fmt.Fprintln(os.Stdout)
 }
 
@@ -81,7 +106,7 @@ func (d *DashboardUI) UpdateProgress(processedBranches, totalBranches uint64, es
 		if failedChecks > 0 {
 			failInfo = fmt.Sprintf(" %s失败%s%s", colorRed, formatUint64(failedChecks), colorReset)
 		}
-		line = fmt.Sprintf("%s 枚举完成 检查%s%s/%s%s %s%5.1f%%%s 已用%s 预计%s 速度%s%.0f条/s%s 命中%s%s",
+		line = fmt.Sprintf("%s 枚举完成 检查%s%s/%s%s %s%5.1f%%%s 已用%s 预计%s 速度%s%.1f条/s%s 命中%s%s",
 			bar,
 			colorYellow, formatUint64(checkedMnemonics), formatUint64(validMnemonics), colorReset,
 			colorYellow, checkPct, colorReset,
@@ -102,7 +127,7 @@ func (d *DashboardUI) UpdateProgress(processedBranches, totalBranches uint64, es
 		if failedChecks > 0 {
 			failInfo = fmt.Sprintf(" %s失败%s%s", colorRed, formatUint64(failedChecks), colorReset)
 		}
-		line = fmt.Sprintf("%s %s%5.1f%%%s 已用%s 预计%s 速度%s%.0f条/s%s 命中%s%s",
+		line = fmt.Sprintf("%s %s%5.1f%%%s 已用%s 预计%s 速度%s%.1f条/s%s 命中%s%s",
 			bar,
 			colorYellow, pct, colorReset,
 			formatDurationShort(elapsed),
@@ -120,12 +145,90 @@ func (d *DashboardUI) AddWalletHit(chainName, symbol, address, balance, seed str
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	formattedBalance := formatBalance(balance, symbol)
+
 	fmt.Fprintln(os.Stdout)
 	printPanel(colorGreen+colorBold+"发现钱包"+colorReset,
 		fmt.Sprintf("链       : %s (%s)", chainName, symbol),
 		fmt.Sprintf("地址     : %s", address),
-		fmt.Sprintf("余额     : %s", balance),
+		fmt.Sprintf("余额     : %s", formattedBalance),
 		fmt.Sprintf("助记词   : %s", seed),
+	)
+	fmt.Fprintln(os.Stdout)
+}
+
+func formatBalance(balanceStr, symbol string) string {
+	if balanceStr == "地址匹配" {
+		return balanceStr
+	}
+
+	balance, ok := new(big.Int).SetString(balanceStr, 10)
+	if !ok {
+		return balanceStr
+	}
+
+	switch strings.ToUpper(symbol) {
+	case "BTC":
+		return formatSatoshiToBTC(balance)
+	case "ETH", "BNB", "MATIC", "AVAX", "FTM", "CELO", "CRO", "MNT":
+		return formatWeiToEther(balance, 18, symbol)
+	case "SOL":
+		return formatWeiToEther(balance, 9, symbol)
+	case "ATOM", "OSMO":
+		return formatWeiToEther(balance, 6, symbol)
+	default:
+		return formatNumberString(balance.String())
+	}
+}
+
+func formatSatoshiToBTC(satoshi *big.Int) string {
+	if satoshi == nil || satoshi.Cmp(big.NewInt(0)) == 0 {
+		return "0 BTC"
+	}
+
+	btc := new(big.Rat).SetFrac(satoshi, big.NewInt(100000000))
+	return btc.FloatString(8) + " BTC"
+}
+
+func formatWeiToEther(wei *big.Int, decimals int, symbol string) string {
+	if wei == nil || wei.Cmp(big.NewInt(0)) == 0 {
+		return "0 " + symbol
+	}
+
+	divisor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
+	ether := new(big.Rat).SetFrac(wei, divisor)
+	return ether.FloatString(decimals) + " " + symbol
+}
+
+func (d *DashboardUI) PrintMnemonicList(mnemonics []string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if len(mnemonics) == 0 {
+		return
+	}
+
+	fmt.Fprintln(os.Stdout)
+	printPanel(
+		fmt.Sprintf("%s所有有效助记词（共 %d 个）%s", colorYellow+colorBold, len(mnemonics), colorReset),
+	)
+
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "%s提示：请用 > 重定向保存到文件，避免终端截断%s\n", colorCyan, colorReset)
+	fmt.Fprintf(os.Stdout, "%s  示例: ./recover -s \"...\" --show-all > mnemonics.txt%s\n\n", colorDim, colorReset)
+
+	for i, m := range mnemonics {
+		fmt.Fprintf(os.Stdout, "  [%4d]  %s\n", i+1, m)
+	}
+
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintln(os.Stdout)
+	printPanel("验证方法",
+		"将上方助记词逐个导入钱包（如 MetaMask / OKX Wallet），",
+		"对比生成的地址是否与已知目标地址一致。",
+		fmt.Sprintf("也可用 grep 快速定位包含特定单词的组合: %s./recover ... --show-all | grep \"<keyword>\"%s", colorCyan, colorReset),
 	)
 	fmt.Fprintln(os.Stdout)
 }

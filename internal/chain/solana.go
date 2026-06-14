@@ -40,7 +40,7 @@ func DeriveSolanaAddress(mnemonic, pathStr string) (string, error) {
 			}
 			childNum = uint32(num) + bip32.FirstHardenedChild
 		} else {
-			num, parseErr := strconv.ParseUint(part, 10, 32)
+			num, parseErr := strconv.ParseUint(numStr, 10, 32)
 			if parseErr != nil {
 				return "", errors.Wrapf(parseErr, "解析路径数字失败: %s", part)
 			}
@@ -53,13 +53,20 @@ func DeriveSolanaAddress(mnemonic, pathStr string) (string, error) {
 		}
 	}
 
-	if len(currentKey.Key) != ed25519.PrivateKeySize {
-		privKey := ed25519.NewKeyFromSeed(currentKey.Key)
-		pubKey := privKey.Public().(ed25519.PublicKey)
-		return base58.Encode(pubKey), nil
+	// Solana 使用 Ed25519，需要 32 字节 seed
+	// go-bip32 派生出的 Key 可能是 33 字节（含压缩标志位）或 32 字节
+	// 取前 32 字节作为 Ed25519 的 seed
+	keyBytes := currentKey.Key
+	if len(keyBytes) > 32 {
+		keyBytes = keyBytes[:32]
+	} else if len(keyBytes) < 32 {
+		// 如果不足 32 字节，需要扩展（理论上不应发生）
+		padded := make([]byte, 32)
+		copy(padded, keyBytes)
+		keyBytes = padded
 	}
 
-	privKey := ed25519.PrivateKey(currentKey.Key)
+	privKey := ed25519.NewKeyFromSeed(keyBytes)
 	pubKey := privKey.Public().(ed25519.PublicKey)
 	return base58.Encode(pubKey), nil
 }
